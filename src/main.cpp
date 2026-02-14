@@ -32,8 +32,6 @@ import vulkan_hpp;
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
-#include <tiny_gltf.h>
-
 #ifndef LAB_TASK_LEVEL
 #	define LAB_TASK_LEVEL 1
 #endif
@@ -862,44 +860,6 @@ private:
 		endSingleTimeCommands(*commandBuffer);
 	}
 
-	void createDefaultTexture()
-	{
-		// 1x1 RGBA white pixel
-		uint8_t pixel[4] = { 255u, 255u, 255u, 255u };
-		vk::DeviceSize imageSize = sizeof(pixel);
-
-		// Staging buffer
-		vk::raii::Buffer       stagingBuffer({});
-		vk::raii::DeviceMemory stagingBufferMemory({});
-		createBuffer(imageSize,
-			vk::BufferUsageFlagBits::eTransferSrc,
-			vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-			stagingBuffer, stagingBufferMemory);
-
-		void* data = stagingBufferMemory.mapMemory(0, imageSize);
-		memcpy(data, pixel, static_cast<size_t>(imageSize));
-		stagingBufferMemory.unmapMemory();
-
-		// Create device image and copy
-		vk::raii::Image        textureImage = nullptr;
-		vk::raii::DeviceMemory textureImageMemory = nullptr;
-		createImage(1, 1,
-			vk::Format::eR8G8B8A8Srgb,
-			vk::ImageTiling::eOptimal,
-			vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
-			vk::MemoryPropertyFlagBits::eDeviceLocal,
-			textureImage, textureImageMemory);
-
-		transitionImageLayout(textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
-		copyBufferToImage(stagingBuffer, textureImage, 1, 1);
-		transitionImageLayout(textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
-
-		// Push into arrays so descriptor creation sees at least one texture
-		textureImages.push_back(std::move(textureImage));
-		textureImageMemories.push_back(std::move(textureImageMemory));
-		textureImageViews.emplace_back(createTextureImageView(textureImages.back()));
-	}
-
 	void loadModel()
 	{
 		tinyobj::attrib_t                attrib;
@@ -931,33 +891,14 @@ private:
 			{
 				Vertex vertex{};
 
-				// Position (assume valid in your models)
 				vertex.pos = {
 					attrib.vertices[3 * index.vertex_index + 0],
 					attrib.vertices[3 * index.vertex_index + 1],
 					attrib.vertices[3 * index.vertex_index + 2] };
 
-				// Safe texcoord extraction: tinyobj uses -1 for missing texcoords.
-				if (index.texcoord_index >= 0)
-				{
-					const size_t ti = static_cast<size_t>(2 * index.texcoord_index);
-					if (ti + 1 < attrib.texcoords.size())
-					{
-						vertex.texCoord = {
-							attrib.texcoords[ti + 0],
-							1.0f - attrib.texcoords[ti + 1] };
-					}
-					else
-					{
-						// attrib.texcoords present but index out of range -> fallback
-						vertex.texCoord = { 0.0f, 0.0f };
-					}
-				}
-				else
-				{
-					// No texcoord for this vertex -> fallback
-					vertex.texCoord = { 0.0f, 0.0f };
-				}
+				vertex.texCoord = {
+					attrib.texcoords[2 * index.texcoord_index + 0],
+					1.0f - attrib.texcoords[2 * index.texcoord_index + 1] };
 
 				vertex.color = { 1.0f, 1.0f, 1.0f };
 
@@ -1032,113 +973,6 @@ private:
 			else
 			{
 				std::cout << "No texture for material: " << material.name << std::endl;
-			}
-		}
-		if (textureImages.size() == 0) {
-			createDefaultTexture();
-		}
-	}
-
-	void loadModelGLTF() {
-		// Use tinygltf to load the model instead of tinyobjloader
-		tinygltf::Model model;
-		tinygltf::TinyGLTF loader;
-		std::string err;
-		std::string warn;
-
-		bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, MODEL_PATH);
-
-		if (!warn.empty()) {
-			std::cout << "glTF warning: " << warn << std::endl;
-		}
-
-		if (!err.empty()) {
-			std::cout << "glTF error: " << err << std::endl;
-		}
-
-		if (!ret) {
-			throw std::runtime_error("Failed to load glTF model");
-		}
-
-		// Process all meshes in the model
-		std::unordered_map<Vertex, uint32_t> uniqueVertices{};
-
-		for (const auto& mesh : model.meshes) {
-			for (const auto& primitive : mesh.primitives) {
-				// Get indices
-				const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
-				const tinygltf::BufferView& indexBufferView = model.bufferViews[indexAccessor.bufferView];
-				const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
-
-				// Get vertex positions
-				const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
-				const tinygltf::BufferView& posBufferView = model.bufferViews[posAccessor.bufferView];
-				const tinygltf::Buffer& posBuffer = model.buffers[posBufferView.buffer];
-
-				// Get texture coordinates if available
-				bool hasTexCoords = primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end();
-				const tinygltf::Accessor* texCoordAccessor = nullptr;
-				const tinygltf::BufferView* texCoordBufferView = nullptr;
-				const tinygltf::Buffer* texCoordBuffer = nullptr;
-
-				if (hasTexCoords) {
-					texCoordAccessor = &model.accessors[primitive.attributes.at("TEXCOORD_0")];
-					texCoordBufferView = &model.bufferViews[texCoordAccessor->bufferView];
-					texCoordBuffer = &model.buffers[texCoordBufferView->buffer];
-				}
-
-				// Process vertices
-				for (size_t i = 0; i < posAccessor.count; i++) {
-					Vertex vertex{};
-
-					// Get position
-					const float* pos = reinterpret_cast<const float*>(&posBuffer.data[posBufferView.byteOffset + posAccessor.byteOffset + i * 12]);
-					vertex.pos = { pos[0], pos[1], pos[2] };
-
-					// Get texture coordinates if available
-					if (hasTexCoords) {
-						const float* texCoord = reinterpret_cast<const float*>(&texCoordBuffer->data[texCoordBufferView->byteOffset + texCoordAccessor->byteOffset + i * 8]);
-						vertex.texCoord = { texCoord[0], 1.0f - texCoord[1] };
-					}
-					else {
-						vertex.texCoord = { 0.0f, 0.0f };
-					}
-
-					// Set default color
-					vertex.color = { 1.0f, 1.0f, 1.0f };
-
-					// Add vertex if unique
-					if (!uniqueVertices.contains(vertex)) {
-						uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
-						vertices.push_back(vertex);
-					}
-				}
-
-				// Process indices
-				const unsigned char* indexData = &indexBuffer.data[indexBufferView.byteOffset + indexAccessor.byteOffset];
-
-				// Handle different index component types
-				if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-					const uint16_t* indices16 = reinterpret_cast<const uint16_t*>(indexData);
-					for (size_t i = 0; i < indexAccessor.count; i++) {
-						Vertex vertex = vertices[indices16[i]];
-						indices.push_back(uniqueVertices[vertex]);
-					}
-				}
-				else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-					const uint32_t* indices32 = reinterpret_cast<const uint32_t*>(indexData);
-					for (size_t i = 0; i < indexAccessor.count; i++) {
-						Vertex vertex = vertices[indices32[i]];
-						indices.push_back(uniqueVertices[vertex]);
-					}
-				}
-				else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
-					const uint8_t* indices8 = reinterpret_cast<const uint8_t*>(indexData);
-					for (size_t i = 0; i < indexAccessor.count; i++) {
-						Vertex vertex = vertices[indices8[i]];
-						indices.push_back(uniqueVertices[vertex]);
-					}
-				}
 			}
 		}
 	}
