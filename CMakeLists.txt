@@ -89,16 +89,39 @@ endfunction()
 # Compile shaders
 add_shaders(VulkanRaytracer)
 
-# Copy assets to build directory (optional)
+# Ensure the entire shaders/ source directory is copied to the runtime shaders folder
+# so readFile("shaders/...") can find either compiled .spv or any prebuilt shaders.
+set(SHADERS_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+# Place shaders next to the executable to match runtime path: <bin>/shaders
+set(SHADERS_DST_DIR "$<TARGET_FILE_DIR:VulkanRaytracer>/shaders")
+
+add_custom_command(TARGET VulkanRaytracer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DST_DIR}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${SHADERS_SRC_DIR} ${SHADERS_DST_DIR}
+    COMMENT "Copying shaders/ to runtime directory"
+)
+
+# Copy assets to build directory (support both assets/models and top-level models)
 file(GLOB TEXTURES ${CMAKE_CURRENT_SOURCE_DIR}/assets/textures/*)
-file(GLOB MODELS ${CMAKE_CURRENT_SOURCE_DIR}/assets/models/*)
+
+file(GLOB MODELS_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets/models/*)
+file(GLOB MODELS_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/models/*)
+
+# Merge found models into a single list
+set(MODELS_LIST)
+if(MODELS_ASSETS)
+    list(APPEND MODELS_LIST ${MODELS_ASSETS})
+endif()
+if(MODELS_ROOT)
+    list(APPEND MODELS_LIST ${MODELS_ROOT})
+endif()
 
 if(TEXTURES)
     file(COPY ${TEXTURES} DESTINATION ${CMAKE_BINARY_DIR}/bin/textures)
 endif()
 
-if(MODELS)
-    file(COPY ${MODELS} DESTINATION ${CMAKE_BINARY_DIR}/bin/models)
+if(MODELS_LIST)
+    file(COPY ${MODELS_LIST} DESTINATION ${CMAKE_BINARY_DIR}/bin/models)
 endif()
 
 # Print configuration summary
