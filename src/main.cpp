@@ -33,7 +33,7 @@ import vulkan_hpp;
 #include <tiny_obj_loader.h>
 
 #ifndef LAB_TASK_LEVEL
-#	define LAB_TASK_LEVEL 1
+#	define LAB_TASK_LEVEL 12
 #endif
 
 #define LAB_TASK_AS_BUILD_AND_BIND 4
@@ -106,10 +106,7 @@ struct UniformBufferObject
 struct PushConstant
 {
 	uint32_t materialIndex;
-#if LAB_TASK_LEVEL >= LAB_TASK_REFLECTIONS
-	// TASK11
-	uint32_t reflective;
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_REFLECTIONS
+	uint32_t reflective = 0;
 };
 
 class VulkanRaytracingApplication
@@ -1038,8 +1035,7 @@ private:
 
 	void createInstanceLUTBuffer()
 	{
-#if LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
-		// TASK09: build a buffer to store the instance look-up table
+		// build a buffer to store the instance look-up table
 		vk::DeviceSize bufferSize = sizeof(InstanceLUT) * instanceLUTs.size();
 
 		vk::raii::Buffer       stagingBuffer({});
@@ -1054,7 +1050,6 @@ private:
 			vk::MemoryPropertyFlagBits::eDeviceLocal, instanceLUTBuffer, instanceLUTBufferMemory);
 
 		copyBuffer(stagingBuffer, instanceLUTBuffer, bufferSize);
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
 	}
 
 	void createUniformBuffers()
@@ -1077,7 +1072,6 @@ private:
 
 	void createAccelerationStructures()
 	{
-#if LAB_TASK_LEVEL >= LAB_TASK_AS_BUILD_AND_BIND
 		vk::BufferDeviceAddressInfo vai{ .buffer = *vertexBuffer };
 		vk::DeviceAddress           vertexAddr = device.getBufferAddressKHR(vai);
 		vk::BufferDeviceAddressInfo iai{ .buffer = *indexBuffer };
@@ -1093,7 +1087,7 @@ private:
 															   std::array<float, 4>{0.f, 1.f, 0.f, 0.f},
 															   std::array<float, 4>{0.f, 0.f, 1.f, 0.f}} };
 
-		// TASK02: Build a bottom level acceleration structure for each submesh
+		// Build a bottom level acceleration structure for each submesh
 		for (size_t i = 0; i < submeshes.size(); ++i)
 		{
 			const auto& submesh = submeshes[i];
@@ -1112,11 +1106,7 @@ private:
 			vk::AccelerationStructureGeometryKHR blasGeometry{
 				.geometryType = vk::GeometryTypeKHR::eTriangles,
 				.geometry = geometryData,
-				.flags = vk::GeometryFlagBitsKHR::eOpaque };
-#	if LAB_TASK_LEVEL >= LAB_TASK_AS_OPAQUE_FLAG
-			// TASK07
-			blasGeometry.flags = (submesh.alphaCut) ? vk::GeometryFlagsKHR(0) : vk::GeometryFlagBitsKHR::eOpaque;
-#	endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_OPAQUE_FLAG
+				.flags = (submesh.alphaCut) ? vk::GeometryFlagsKHR(0) : vk::GeometryFlagBitsKHR::eOpaque };
 
 			vk::AccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{
 				.type = vk::AccelerationStructureTypeKHR::eBottomLevel,
@@ -1149,7 +1139,7 @@ private:
 			vk::DeviceAddress           scratchAddr = device.getBufferAddressKHR(scratchAddressInfo);
 			blasBuildGeometryInfo.scratchData.deviceAddress = scratchAddr;
 
-			// Create a buffer for the BLAS itself now that we now the required size
+			// Create a buffer for the BLAS itself now that we know the required size
 			vk::raii::Buffer       blasBuffer = nullptr;
 			vk::raii::DeviceMemory blasMemory = nullptr;
 			blasBuffers.emplace_back(std::move(blasBuffer));
@@ -1198,15 +1188,11 @@ private:
 
 			instances.push_back(instance);
 
-#	if LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
-			// TASK09: store the instance look-up table entry
 			instances[i].instanceCustomIndex = static_cast<uint32_t>(i);
-
 			instanceLUTs.push_back({ static_cast<uint32_t>(submesh.materialID), submesh.indexOffset });
-#	endif        // LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
 		}
 
-		// TASK03: Prepare the instance data buffer
+		// Prepare the instance data buffer
 		vk::DeviceSize instBufferSize = sizeof(instances[0]) * instances.size();
 		createBuffer(instBufferSize,
 			vk::BufferUsageFlagBits::eShaderDeviceAddress |
@@ -1236,13 +1222,11 @@ private:
 
 		vk::AccelerationStructureBuildGeometryInfoKHR tlasBuildGeometryInfo{
 			.type = vk::AccelerationStructureTypeKHR::eTopLevel,
+			.flags = vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate,
 			.mode = vk::BuildAccelerationStructureModeKHR::eBuild,
 			.geometryCount = 1,
-			.pGeometries = &tlasGeometry };
-
-#	if LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
-		tlasBuildGeometryInfo.flags = vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate;
-#	endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
+			.pGeometries = &tlasGeometry,
+		 };
 
 		// Query the memory sizes that will be needed for this TLAS
 		auto primitiveCount = static_cast<uint32_t>(instances.size());
@@ -1302,7 +1286,6 @@ private:
 		cmd->buildAccelerationStructuresKHR({ tlasBuildGeometryInfo }, { &tlasRangeInfo });
 
 		endSingleTimeCommands(*cmd);
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_BUILD_AND_BIND
 	}
 
 	void createDescriptorPool()
@@ -1351,8 +1334,7 @@ private:
 				.descriptorType = vk::DescriptorType::eUniformBuffer,
 				.pBufferInfo = &bufferInfo };
 
-#if LAB_TASK_LEVEL >= LAB_TASK_AS_BUILD_AND_BIND
-			// TASK04: define the acceleration structure descriptor.
+			// define the acceleration structure descriptor.
 			vk::WriteDescriptorSetAccelerationStructureKHR asInfo{
 				.accelerationStructureCount = 1,
 				.pAccelerationStructures = {&*tlas} };
@@ -1364,7 +1346,6 @@ private:
 				.dstArrayElement = 0,
 				.descriptorCount = 1,
 				.descriptorType = vk::DescriptorType::eAccelerationStructureKHR };
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_BUILD_AND_BIND
 
 			// Indices SSBO
 			vk::DescriptorBufferInfo indexBufferInfo{
@@ -1394,8 +1375,7 @@ private:
 				.descriptorType = vk::DescriptorType::eStorageBuffer,
 				.pBufferInfo = &uvBufferInfo };
 
-#if LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
-			// TASK09: Instance LUT SSBO
+			// Instance LUT SSBO
 			vk::DescriptorBufferInfo instanceLUTBufferInfo{
 				.buffer = instanceLUTBuffer,
 				.offset = 0,
@@ -1408,17 +1388,8 @@ private:
 				.descriptorCount = 1,
 				.descriptorType = vk::DescriptorType::eStorageBuffer,
 				.pBufferInfo = &instanceLUTBufferInfo };
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
 
-#if LAB_TASK_LEVEL >= LAB_TASK_INSTANCE_LUT
-			// TASK09: Include the instance look-up table descriptor
 			std::array<vk::WriteDescriptorSet, 5> descriptorWrites{ bufferWrite, asWrite, indexBufferWrite, uvBufferWrite, instanceLUTBufferWrite };
-#elif LAB_TASK_LEVEL >= LAB_TASK_AS_BUILD_AND_BIND
-			// TASK04: Include the acceleration structure descriptor
-			std::array<vk::WriteDescriptorSet, 4> descriptorWrites{ bufferWrite, asWrite, indexBufferWrite, uvBufferWrite };
-#else
-			std::array<vk::WriteDescriptorSet, 3> descriptorWrites{ bufferWrite, indexBufferWrite, uvBufferWrite };
-#endif
 
 			device.updateDescriptorSets(descriptorWrites, {});
 		}
@@ -1624,12 +1595,10 @@ private:
 
 		for (auto& sub : submeshes)
 		{
-			// TASK09: Bindless resources
+			// Bindless resources
 			PushConstant pushConstant = {
 				.materialIndex = sub.materialID < 0 ? 0u : static_cast<uint32_t>(sub.materialID),
-#if LAB_TASK_LEVEL >= LAB_TASK_REFLECTIONS
 				.reflective = sub.reflective
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_REFLECTIONS
 			};
 			commandBuffer.pushConstants<PushConstant>(pipelineLayout, vk::ShaderStageFlagBits::eFragment, 0, pushConstant);
 
@@ -1719,7 +1688,6 @@ private:
 		memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 	}
 
-#if LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
 	void updateTopLevelAS(const glm::mat4& model)
 	{
 		vk::TransformMatrixKHR tm{};
@@ -1761,7 +1729,7 @@ private:
 			.geometryType = vk::GeometryTypeKHR::eInstances,
 			.geometry = geometryData };
 
-		// TASK06: Note the new parameters to re-build the TLAS in-place
+		// Note the new parameters to re-build the TLAS in-place
 		vk::AccelerationStructureBuildGeometryInfoKHR tlasBuildGeometryInfo{
 			.type = vk::AccelerationStructureTypeKHR::eTopLevel,
 			.flags = vk::BuildAccelerationStructureFlagBitsKHR::eAllowUpdate,
@@ -1785,7 +1753,7 @@ private:
 		// Re-build the TLAS
 		auto cmd = beginSingleTimeCommands();
 
-		// Pre-build barrier
+		// Pre-build barrier to ensure any previous writes or shader reads are completed before the build
 		vk::MemoryBarrier preBarrier{
 			.srcAccessMask = vk::AccessFlagBits::eAccelerationStructureWriteKHR | vk::AccessFlagBits::eTransferWrite | vk::AccessFlagBits::eShaderRead,
 			.dstAccessMask = vk::AccessFlagBits::eAccelerationStructureReadKHR | vk::AccessFlagBits::eAccelerationStructureWriteKHR };
@@ -1817,41 +1785,30 @@ private:
 
 		endSingleTimeCommands(*cmd);
 	}
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
 
 	void drawFrame()
 	{
-		// Note: inFlightFences, presentCompleteSemaphores, and commandBuffers are indexed by frameIndex,
-		//       while renderFinishedSemaphores is indexed by imageIndex
 		auto fenceResult = device.waitForFences(*inFlightFences[frameIndex], vk::True, UINT64_MAX);
 		if (fenceResult != vk::Result::eSuccess)
 		{
 			throw std::runtime_error("failed to wait for fence!");
 		}
 
-		auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphores[frameIndex], nullptr);
-
-		// Due to VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS being defined, eErrorOutOfDateKHR can be checked as a result
-		// here and does not need to be caught by an exception.
-		if (result == vk::Result::eErrorOutOfDateKHR)
+		uint32_t imageIndex;
+		try
+		{
+			auto res = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphores[frameIndex], nullptr);
+			imageIndex = res.value;
+		}
+		catch (const vk::OutOfDateKHRError& e)
 		{
 			recreateSwapChain();
 			return;
 		}
-		// On other success codes than eSuccess and eSuboptimalKHR we just throw an exception.
-		// On any error code, aquireNextImage already threw an exception.
-		if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR)
-		{
-			assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
-			throw std::runtime_error("failed to acquire swap chain image!");
-		}
-		updateUniformBuffer(frameIndex);
-#if LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
-		// TASK06: Update the TLAS with the current model matrix
-		updateTopLevelAS(ubo.model);
-#endif        // LAB_TASK_LEVEL >= LAB_TASK_AS_ANIMATION
 
-		// Only reset the fence if we are submitting work
+		updateUniformBuffer(frameIndex);
+		updateTopLevelAS(ubo.model);
+
 		device.resetFences(*inFlightFences[frameIndex]);
 
 		commandBuffers[frameIndex].reset();
@@ -1872,19 +1829,23 @@ private:
 												.swapchainCount = 1,
 												.pSwapchains = &*swapChain,
 												.pImageIndices = &imageIndex };
-		result = presentQueue.presentKHR(presentInfoKHR);
-		// Due to VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS being defined, eErrorOutOfDateKHR can be checked as a result
-		// here and does not need to be caught by an exception.
-		if ((result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) || framebufferResized)
+
+		try
+		{
+			auto result = presentQueue.presentKHR(presentInfoKHR);
+
+			if ((result == vk::Result::eSuboptimalKHR) || framebufferResized)
+			{
+				framebufferResized = false;
+				recreateSwapChain();
+			}
+		}
+		catch (const vk::OutOfDateKHRError& e)
 		{
 			framebufferResized = false;
 			recreateSwapChain();
 		}
-		else
-		{
-			// There are no other success codes than eSuccess; on any error code, presentKHR already threw an exception.
-			assert(result == vk::Result::eSuccess);
-		}
+
 		frameIndex = (frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
 	}
 
