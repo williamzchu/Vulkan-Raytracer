@@ -218,6 +218,8 @@ private:
 	std::vector<vk::raii::Fence>     inFlightFences;
 	uint32_t                         frameIndex = 0;
 
+	glm::vec3 modelTranslation = glm::vec3(0.0f);
+
 	bool framebufferResized = false;
 
 	std::vector<const char*> requiredDeviceExtension = {
@@ -239,12 +241,28 @@ private:
 		window = glfwCreateWindow(WIDTH, HEIGHT, "Vulkan", nullptr, nullptr);
 		glfwSetWindowUserPointer(window, this);
 		glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+		glfwSetKeyCallback(window, keyCallback);
 	}
 
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
 	{
 		auto app = static_cast<VulkanRaytracingApplication*>(glfwGetWindowUserPointer(window));
 		app->framebufferResized = true;
+	}
+
+	static void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+	{
+		auto app = static_cast<VulkanRaytracingApplication*>(glfwGetWindowUserPointer(window));
+		if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+			float step = 0.1f;
+			if (key == GLFW_KEY_LEFT) app->modelTranslation.x -= step;
+			if (key == GLFW_KEY_RIGHT) app->modelTranslation.x += step;
+			if (key == GLFW_KEY_UP) app->modelTranslation.y += step;
+			if (key == GLFW_KEY_DOWN) app->modelTranslation.y -= step;
+			if (key == GLFW_KEY_PAGE_UP) app->modelTranslation.z += step;
+			if (key == GLFW_KEY_PAGE_DOWN) app->modelTranslation.z -= step;
+			if (key == GLFW_KEY_R) app->modelTranslation = glm::vec3(0.0f);
+		}
 	}
 
 	void initVulkan()
@@ -1673,13 +1691,15 @@ private:
 	void updateUniformBuffer(uint32_t currentImage)
 	{
 		static auto startTime = std::chrono::high_resolution_clock::now();
-
-		auto  currentTime = std::chrono::high_resolution_clock::now();
+		auto currentTime = std::chrono::high_resolution_clock::now();
 		float time = std::chrono::duration<float>(currentTime - startTime).count();
 
-		auto eye = glm::vec3(2.0f, 2.0f, 2.0f);
+		auto eye = glm::vec3(0.0f, 2.0f, 2.0f);
 
-		ubo.model = rotate(glm::mat4(1.0f), time * 0.1f * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		// Apply translation
+		ubo.model = glm::translate(glm::mat4(1.0f), modelTranslation) *
+			glm::rotate(glm::mat4(1.0f), time * 0.1f * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
 		ubo.view = lookAt(eye, glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height), 0.1f, 10.0f);
 		ubo.proj[1][1] *= -1;
